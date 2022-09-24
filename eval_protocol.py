@@ -35,7 +35,7 @@ from thop import profile
 from thop import clever_format
 
 from utils import (Transform, build_model, load_checkpoint, make_dataset,
-                   read_py_config)
+                   read_py_config, get_thresholdtable_from_fpr, get_tpr_from_threshold)
 
 
 def main():
@@ -76,12 +76,13 @@ def main():
     test_loader = DataLoader(dataset=test_dataset, batch_size=100, shuffle=True, num_workers=2)
 
     # computing metrics
-    auc_, eer, accur, apcer, bpcer, acer, fpr, tpr  = evaluate(model, test_loader,
+    auc_, eer, accur, apcer, bpcer, acer, fpr, tpr, hter  = evaluate(model, test_loader,
                                                                config, device,
                                                                compute_accuracy=True)
     print((f'eer = {round(eer*100,2)}\n'
            + f'accuracy on test data = {round(np.mean(accur),3)}\n'
            + f'auc = {round(auc_,3)}\n'
+           + f'hter = {round(hter,3)}\n'
            + f'apcer = {round(apcer*100,2)}\n'
            + f'bpcer = {round(bpcer*100,2)}\n'
            + f'acer = {round(acer*100,2)}\n'
@@ -124,6 +125,7 @@ def evaluate(model, loader, config, device, compute_accuracy=True):
 
             y_true = target.detach().cpu().numpy()
             y_pred = output.argmax(dim=1).detach().cpu().numpy()
+
             tn_batch, fp_batch, fn_batch, tp_batch = metrics.confusion_matrix(y_true=y_true,
                                                                               y_pred=y_pred,
                                                                               ).ravel()
@@ -136,11 +138,20 @@ def evaluate(model, loader, config, device, compute_accuracy=True):
                 accur.append((y_pred == y_true).mean())
             if config.loss.amsoftmax.margin_type in ('cos', 'arcos'):
                 output *= config.loss.amsoftmax.s
-            if config.loss.loss_type == 'soft_triple':
-                output *= config.loss.soft_triple.s
             positive_probabilities = F.softmax(output, dim=-1)[:,1].cpu().numpy()
         proba_accum = np.concatenate((proba_accum, positive_probabilities))
         target_accum = np.concatenate((target_accum, y_true))
+
+
+    fpr_list = [0.01, 0.005, 0.001]
+    threshold_list = get_thresholdtable_from_fpr(proba_accum,target_accum, fpr_list)
+    tpr_list = get_tpr_from_threshold(proba_accum,target_accum, threshold_list)
+      
+    # Show the result into score_path/score.txt  
+    print('TPR@FPR=10E-3: {}\n'.format(tpr_list[0]))
+    print('TPR@FPR=5E-3: {}\n'.format(tpr_list[1]))
+    print('TPR@FPR=10E-4: {}\n'.format(tpr_list[2]))
+
 
     apcer = fp / (tn + fp) if (tn + fp) != 0 else 0
     bpcer = fn / (fn + tp) if (fn + tp) != 0 else 0
@@ -150,11 +161,12 @@ def evaluate(model, loader, config, device, compute_accuracy=True):
     fnr = 1 - tpr
     fpr_eer = fpr[np.nanargmin(np.absolute((fnr - fpr)))]
     fnr_eer = fnr[np.nanargmin(np.absolute((fnr - fpr)))]
+    hter = (fpr_eer + fnr_eer) / 2
     eer = min(fpr_eer, fnr_eer)
     auc_ = auc(fpr, tpr)
-    to_return = ((auc_, eer, accur, apcer, bpcer, acer, fpr, tpr)
+    to_return = ((auc_, eer, accur, apcer, bpcer, acer, fpr, tpr, hter)
                 if compute_accuracy
-                else (auc_, eer, apcer, bpcer, acer))
+                else (auc_, eer, apcer, bpcer, acer, hter))
     return to_return
 
 def plot_roc_curve(fpr, tpr, config):
@@ -167,7 +179,7 @@ def plot_roc_curve(fpr, tpr, config):
     plt.title('ROC curve', fontsize=16)
     plt.legend(loc='lower right', fontsize=13)
     plt.plot([0,1],[0,1], lw=3, linestyle='--', color='navy')
-    plt.savefig(os.path.join(config.checkpoint.experiment_path, config.curves.det_curve))
+    plt.savefig(os.path.join(config.checkpoint.experiment_path, config.curves.roc_curve))
 
 def det_curve(fps,fns, eer, config):
     """

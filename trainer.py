@@ -163,9 +163,9 @@ class Trainer:
         # evaluate on last 10 epoch and remember best accuracy, AUC, EER, ACER and then save checkpoint
         if (epoch%10 == 0 or epoch >= (self.config.epochs.max_epoch - 10)) and (epoch_accuracy > self.current_accuracy):
             print('__VAL__:')
-            AUC, EER, apcer, bpcer, acer = evaluate(self.model, self.val_loader,
+            AUC, EER, apcer, bpcer, acer, hter = evaluate(self.model, self.val_loader,
                                                     self.config, self.device, compute_accuracy=False)
-            print(self.print_result(AUC, EER, epoch_accuracy, apcer, bpcer, acer))
+            print(self.print_result(AUC, EER, epoch_accuracy, apcer, bpcer, acer, hter))
             if acer < self.best_acer:
                 self.best_acer = acer
                 if save_chkpt:
@@ -175,10 +175,10 @@ class Trainer:
                 self.current_accuracy = epoch_accuracy
                 self.current_eer = EER
                 self.current_auc = AUC
-                AUC, EER, accur, apcer, bpcer, acer, _, _ = evaluate(self.model, self.test_loader, self.config,
+                AUC, EER, accur, apcer, bpcer, acer, _, _, hter = evaluate(self.model, self.test_loader, self.config,
                                                                      self.device, compute_accuracy=True)
                 print('__TEST__:')
-                print(self.print_result(AUC, EER, accur, apcer, bpcer, acer))
+                print(self.print_result(AUC, EER, accur, apcer, bpcer, acer, hter))
 
     def make_output(self, input_: torch.tensor, target: torch.tensor):
         ''' target - one hot for main task
@@ -292,16 +292,17 @@ class Trainer:
 
         for loader in (self.val_loader, self.test_loader):
             # printing results
-            AUC, EER, accur, apcer, bpcer, acer, _, _ = evaluate(self.model, loader, self.config,
+            AUC, EER, accur, apcer, bpcer, acer, _, _, hter = evaluate(self.model, loader, self.config,
                                                                 self.device, compute_accuracy=True)
-            results = self.print_result(AUC, EER, accur, apcer, bpcer, acer)
+            results = self.print_result(AUC, EER, accur, apcer, bpcer, acer, hter)
             with open(os.path.join(self.config.checkpoint.experiment_path, file_name), 'a') as f:
                 f.write(results)
 
     @staticmethod
-    def print_result(AUC, EER, accur, apcer, bpcer, acer):
+    def print_result(AUC, EER, accur, apcer, bpcer, acer, hter):
         results = (f'accuracy on test data = {round(np.mean(accur)*100,3)}\n'
                    + f'AUC = {round(AUC,3)}\n'
+                   + f'HTER = {round(hter,3)}\n'
                    + f'EER = {round(EER*100,2)}\n'
                    + f'apcer = {round(apcer*100,2)}\n'
                    + f'bpcer = {round(bpcer*100,2)}\n'

@@ -21,14 +21,14 @@ optimizer = dict(lr=0.005, momentum=0.9, weight_decay=5e-4)
 
 scheduler = dict(milestones=[20,50], gamma=0.2)
 
-data = dict(batch_size=128,
+data = dict(batch_size=150,
             data_loader_workers=32,
             sampler=True,
             pin_memory=True)
 
 resize = dict(height=224, width=224)
 
-checkpoint = dict(snapshot_name="MobileNet3-large.pth.tar",
+checkpoint = dict(snapshot_name="MobileNet3-large-224.pth.tar",
                   experiment_path='./logs_large')
 
 loss = dict(loss_type='amsoftmax',
@@ -69,6 +69,6 @@ RSC = dict(use_rsc=False,
 
 test_dataset = dict(type='LCC_FASD')
 
-conv_cd = dict(theta=0)
+conv_cd = dict(theta=0.7)
 
 test_file_name = "test_mnv3_large"

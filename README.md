@@ -1,7 +1,7 @@
 # Lightweight Face Anti Spoofing
 Towards the solving anti-spoofing problem on RGB only data.
 ## Introduction
-This repository contains a training and evaluation pipeline with different regularization methods for face anti-spoofing network. There are a few models available for training purposes, based on MobileNetv3 (MN3). Project supports natively three datasets: [CelebA Spoof](https://github.com/Davidzhangyuanhan/CelebA-Spoof), [CASIA-SURF CeFA](https://arxiv.org/pdf/2003.05136.pdf).
+This repository contains a training and evaluation pipeline with different regularization methods for face anti-spoofing network. There are a few models available for training purposes, based on MobileNetv3 (MN3). Project supports natively three datasets: [CelebA Spoof](https://github.com/Davidzhangyuanhan/CelebA-Spoof), [LCC FASD](https://csit.am/2019/proceedings/PRIP/PRIP3.pdf) [CASIA-SURF CeFA](https://arxiv.org/pdf/2003.05136.pdf).
 
 
 ### Data Preparation
@@ -18,7 +18,7 @@ Now you are ready to launch the training process!
 
 ### Configuration file
 The script for training and inference uses a configuration file. This is [default one](./configs/config.py). You need to specify paths to datasets. The training pipeline supports the following methods, which you can switch on and tune hyperparameters while training:
-* **dataset** - this is an indicator which dataset you will be using during training. Available options are 'celeba-spoof', 'Casia'.
+* **dataset** - this is an indicator which dataset you will be using during training. Available options are 'celeba-spoof', 'LCC_FASD', 'Casia'.
 * **multi_task_learning** - specify whether or not to train with multitasking loss. **It is available for the CelebA-Spoof dataset only!**
 * **evaluation** - it is the flag to perform the assessment at the end of training and write metrics to a file
 * **test_dataset** - this is an indicator on which dataset you want to test. Options are the same as for dataset parameter
@@ -46,7 +46,7 @@ python train.py --config <path to config>;
 For additional parameters, you can refer to help (`--help`). For example, you can specify on which GPU you want to train your model. If for some reason you want to train on CPU, specify `--device` to `cpu`. The default device is `cuda 0`.
 
 ## Testing
-To test your model set 'test_dataset' in config file to one of preferable dataset (available params: 'celeba-spoof', 'Casia'). Then run script:
+To test your model set 'test_dataset' in config file to one of preferable dataset (available params: 'celeba-spoof', 'LCC_FASD', 'Casia'). Then run script:
 ```bash
 python eval_protocol.py --config <path to config>;
 ```
