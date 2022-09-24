@@ -1,4 +1,4 @@
-# Lightweight Face Anti Spoofing
+# Face Anti Spoofing with mobileNetv3
 Towards the solving anti-spoofing problem on RGB only data.
 ## Introduction
 This repository contains a training and evaluation pipeline with different regularization methods for face anti-spoofing network. There are a few models available for training purposes, based on MobileNetv3 (MN3). Project supports natively three datasets: [CelebA Spoof](https://github.com/Davidzhangyuanhan/CelebA-Spoof), [LCC FASD](https://arxiv.org/pdf/2003.05136.pdf).
