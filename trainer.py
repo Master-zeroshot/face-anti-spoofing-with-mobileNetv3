@@ -24,14 +24,21 @@ import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
-from eval_protocol import evaluate
+from eval_protocol import (evaluate, plot_roc_curve, det_curve, get_thresholdtable_from_fpr, get_tpr_from_threshold)
 from utils import (AverageMeter, cutmix, load_checkpoint,
-                   mixup_target, precision, save_checkpoint)
+                   mixup_target, precision, save_checkpoint, SVM_Loss)
 
+import pandas as pd
+import joblib
+from sklearn import metrics
+import logging
+
+logger = logging.getLogger(__name__)
 
 class Trainer:
     def __init__(self, model, criterion, optimizer, device,
                  config, train_loader, val_loader, test_loader):
+
         self.model = model
         self.criterion = criterion
         self.optimizer = optimizer
@@ -47,6 +54,142 @@ class Trainer:
                                                 self.config.checkpoint.snapshot_name)
         self.writer = SummaryWriter(self.config.checkpoint.experiment_path)
 
+
+    def prepare_train_features(self):
+        self.model.train()
+        path = (os.path.join(self.config.datasets.Celeba_root,'metas/intra_test'))
+        flag = False
+        data = []
+        label = []
+        loop = tqdm(enumerate(self.train_loader), total=len(self.train_loader), leave=False)
+        for i, (input_, target) in loop:
+
+            input_ = input_.to(self.device)
+            target = target.to(self.device)
+            # compute output and loss
+
+            
+            # for idx, img in enumerate(batch):
+            new_target = (F.one_hot(target[:,0], num_classes=2)
+                        if self.config.multi_task_learning
+                        else F.one_hot(target, num_classes=2))
+            new_labels = target[:,0] if self.config.multi_task_learning else target
+
+            features = self.model(input_)
+
+            output = features.view(features.size(0), -1)
+            for j in range(0, output.size()[0]):
+                data.append(output[j].cpu().detach().numpy())
+                label.append(new_labels[j].cpu().detach().numpy())
+
+            if i != 0 and (i % 800 == 0 or i == len(self.train_loader) - 1):
+                dtf = pd.DataFrame(data=data)
+                label_dtf = pd.DataFrame(data=label, columns=['label'])
+                full = pd.concat([dtf, label_dtf], axis=1)
+                # if i % 10000 == 0:
+                file_name = f'train_data_features_{i // 800}.csv'
+                output_path = (os.path.join(path, file_name))
+                full.to_csv(output_path, mode='a', index=False, header=not os.path.exists(output_path))
+                data = []
+                label = []
+            self.train_step += 1
+
+    def train_withxgb(self, model):
+        self.model.train()
+        path = (os.path.join(self.config.datasets.Celeba_root,'metas/intra_test'))
+        from pathlib import Path
+        
+        files = Path(path).glob('train_data_features_*')
+        # loop = tqdm(enumerate(files), total=len(files), leave=False)
+
+        for f in files:
+            print(f)
+            full = pd.read_csv(f)
+
+            features = full.columns[~full.columns.isin(['label'])]
+            model.fit(full[features], full['label'])
+      
+        
+
+        joblib.dump(model, './model.pkl')
+
+    def prepare_validation_features(self):
+        path = (os.path.join(self.config.datasets.Celeba_root,'metas/intra_test'))
+
+        self.model.eval()
+        data = []
+        label = []
+        loop = tqdm(enumerate(self.val_loader), total=len(self.val_loader), leave=False)
+        for i, (input_, target) in loop:
+
+            input_ = input_.to(self.device)
+            target = target.to(self.device)
+            # compute output and loss
+
+
+            # for idx, img in enumerate(batch):
+            new_target = (F.one_hot(target[:,0], num_classes=2)
+                        if self.config.multi_task_learning
+                        else F.one_hot(target, num_classes=2))
+            new_labels = target[:,0] if self.config.multi_task_learning else target
+
+            features = self.model(input_)
+
+            output = features.view(features.size(0), -1)
+            for j in range(0, output.size()[0]):
+                data.append(output[j].cpu().detach().numpy())
+                label.append(new_labels[j].cpu().detach().numpy())
+            
+            self.train_step += 1
+
+        proba_accum = np.array([])
+        target_accum = np.array([])
+        accur=[]
+        dtf = pd.DataFrame(data=data)
+        label_dtf = pd.DataFrame(data=label, columns=['label'])
+        dtf_test = pd.concat([dtf, label_dtf], axis=1)
+        output_path = (os.path.join(path, 'velidation_data_features.csv'))
+        dtf_test.to_csv(output_path, mode='a', index=False, header=not os.path.exists(output_path))
+                
+    def prepare_test_features(self):
+        path = (os.path.join(self.config.datasets.Celeba_root,'metas/intra_test'))
+
+        self.model.eval()
+        data = []
+        label = []
+        loop = tqdm(enumerate(self.test_loader), total=len(self.test_loader), leave=False)
+        for i, (input_, target) in loop:
+
+            input_ = input_.to(self.device)
+            target = target.to(self.device)
+            # compute output and loss
+
+            new_labels = target
+            # new_target = (F.one_hot(target[:,0], num_classes=2)
+            #             if self.config.multi_task_learning
+            #             else F.one_hot(target, num_classes=2))
+            # new_labels = target[:,0] if self.config.multi_task_learning else target
+
+
+            features = self.model(input_)
+
+            output = features.view(features.size(0), -1)
+            for j in range(0, output.size()[0]):
+                data.append(output[j].cpu().detach().numpy())
+                label.append(new_labels[j].cpu().detach().numpy())
+            
+            self.train_step += 1
+
+        proba_accum = np.array([])
+        target_accum = np.array([])
+        accur=[]
+        dtf = pd.DataFrame(data=data)
+        label_dtf = pd.DataFrame(data=label, columns=['label'])
+        dtf_test = pd.concat([dtf, label_dtf], axis=1)
+        output_path = (os.path.join(path, 'test_data_features_lcc_fasd.csv'))
+        dtf_test.to_csv(output_path, mode='a', index=False, header=not os.path.exists(output_path))
+                
+
     def train(self, epoch: int):
         ''' method to train your model for epoch '''
         losses = AverageMeter()
@@ -57,6 +200,8 @@ class Trainer:
         for i, (input_, target) in loop:
             if i == self.config.test_steps:
                 break
+            # if i == len(self.train_loader)/2:
+            #     break
             input_ = input_.to(self.device)
             target = target.to(self.device)
             # compute output and loss
@@ -151,7 +296,7 @@ class Trainer:
             # update progress bar
             loop.set_postfix(loss=loss.item(), avr_loss = losses.avg, acc=acc, avr_acc=accuracy.avg)
 
-        print(f'val accuracy on epoch: {round(accuracy.avg, 3)}, loss on epoch:{round(losses.avg, 3)}')
+        logger.info(f'val accuracy on epoch: {round(accuracy.avg, 3)}, loss on epoch:{round(losses.avg, 3)}')
         # write val in writer
         self.writer.add_scalar('Val/loss', losses.avg, global_step=self.val_step)
         self.writer.add_scalar('Val/accuracy',  accuracy.avg, global_step=self.val_step)
@@ -162,10 +307,10 @@ class Trainer:
     def eval(self, epoch: int, epoch_accuracy: float, save_chkpt: bool=True):
         # evaluate on last 10 epoch and remember best accuracy, AUC, EER, ACER and then save checkpoint
         if (epoch%10 == 0 or epoch >= (self.config.epochs.max_epoch - 10)) and (epoch_accuracy > self.current_accuracy):
-            print('__VAL__:')
+            logger.info('__VAL__:')
             AUC, EER, apcer, bpcer, acer, hter = evaluate(self.model, self.val_loader,
                                                     self.config, self.device, compute_accuracy=False)
-            print(self.print_result(AUC, EER, epoch_accuracy, apcer, bpcer, acer, hter))
+            logger.info(self.print_result(AUC, EER, epoch_accuracy/100, apcer, bpcer, acer, hter))
             if acer < self.best_acer:
                 self.best_acer = acer
                 if save_chkpt:
@@ -175,10 +320,10 @@ class Trainer:
                 self.current_accuracy = epoch_accuracy
                 self.current_eer = EER
                 self.current_auc = AUC
+                logger.info('__TEST__:')
                 AUC, EER, accur, apcer, bpcer, acer, _, _, hter = evaluate(self.model, self.test_loader, self.config,
                                                                      self.device, compute_accuracy=True)
-                print('__TEST__:')
-                print(self.print_result(AUC, EER, accur, apcer, bpcer, acer, hter))
+                logger.info(self.print_result(AUC, EER, accur, apcer, bpcer, acer, hter))
 
     def make_output(self, input_: torch.tensor, target: torch.tensor):
         ''' target - one hot for main task
@@ -241,6 +386,7 @@ class Trainer:
         ''' output -> tuple of given losses
         target -> torch tensor of a shape [batch*num_tasks]
         return loss function '''
+        # softmax, cross_entropy, bce = self.criterion
         softmax, cross_entropy, bce = self.criterion
         if self.config.aug.type_aug:
             target_a, target_b, lam = target
@@ -261,6 +407,7 @@ class Trainer:
 
             # compute losses
             spoof_loss = softmax(output[0], spoof_target)
+            # spoof_loss = svm_loss_criteria(output[0], spoof_target)
             spoof_type_loss = cross_entropy(output[1], spoof_type_target)
             lightning_loss = cross_entropy(output[2], lightning_target)
 
@@ -284,7 +431,7 @@ class Trainer:
 
     def test(self, file_name):
         ''' get metrics and record it to the file '''
-        print('_____________EVAULATION_____________')
+        logger.info('_____________EVAULATION_____________')
         # load snapshot
         load_checkpoint(self.path_to_checkpoint, self.model,
                         map_location=self.device, optimizer=None,
@@ -295,12 +442,13 @@ class Trainer:
             AUC, EER, accur, apcer, bpcer, acer, _, _, hter = evaluate(self.model, loader, self.config,
                                                                 self.device, compute_accuracy=True)
             results = self.print_result(AUC, EER, accur, apcer, bpcer, acer, hter)
+            logger.info(results)
             with open(os.path.join(self.config.checkpoint.experiment_path, file_name), 'a') as f:
                 f.write(results)
 
     @staticmethod
     def print_result(AUC, EER, accur, apcer, bpcer, acer, hter):
-        results = (f'accuracy on test data = {round(np.mean(accur)*100,3)}\n'
+        results = (f'accuracy = {round(np.mean(accur)*100,3)}\n'
                    + f'AUC = {round(AUC,3)}\n'
                    + f'HTER = {round(hter,3)}\n'
                    + f'EER = {round(EER*100,2)}\n'
@@ -312,43 +460,43 @@ class Trainer:
     def get_exp_info(self):
         if not self.config.test_steps:
             exp_num = self.config.exp_num
-            print(f'_______INIT EXPERIMENT {exp_num}______')
+            logger.info(f'_______INIT EXPERIMENT {exp_num}______')
             train_dataset, test_dataset = self.config.dataset, self.config.test_dataset.type
-            print(f'training on {train_dataset}, testing on {test_dataset}')
-            print('\n\nSNAPSHOT')
+            logger.info(f'training on {train_dataset}, testing on {test_dataset}')
+            logger.info('\n\nSNAPSHOT')
             for key, item in self.config.checkpoint.items():
-                print(f'{key} --> {item}')
-            print('\n\nMODEL')
+                logger.info(f'{key} --> {item}')
+            logger.info('\n\nMODEL')
             for key, item in self.config.model.items():
-                print(f'{key} --> {item}')
+                logger.info(f'{key} --> {item}')
             loss_type = self.config.loss.loss_type
-            print(f'\n\nLOSS TYPE : {loss_type.upper()}')
+            logger.info(f'\n\nLOSS TYPE : {loss_type.upper()}')
             for key, item in self.config.loss[f'{loss_type}'].items():
-                print(f'{key} --> {item}')
-            print('\n\nDROPOUT PARAMS')
+                logger.info(f'{key} --> {item}')
+            logger.info('\n\nDROPOUT PARAMS')
             for key, item in self.config.dropout.items():
-                print(f'{key} --> {item}')
-            print('\n\nOPTIMAIZER')
+                logger.info(f'{key} --> {item}')
+            logger.info('\n\nOPTIMAIZER')
             for key, item in self.config.optimizer.items():
-                print(f'{key} --> {item}')
-            print('\n\nADDITIONAL USING PARAMETRS')
+                logger.info(f'{key} --> {item}')
+            logger.info('\n\nADDITIONAL USING PARAMETRS')
             if self.config.aug.type_aug:
                 type_aug = self.config.aug.type_aug
-                print(f'\nAUG TYPE = {type_aug} USING')
+                logger.info(f'\nAUG TYPE = {type_aug} USING')
                 for key, item in self.config.aug.items():
-                    print(f'{key} --> {item}')
+                    logger.info(f'{key} --> {item}')
             if self.config.RSC.use_rsc:
-                print('RSC USING')
+                logger.info('RSC USING')
                 for key, item in self.config.RSC.items():
-                    print(f'{key} --> {item}')
+                    logger.info(f'{key} --> {item}')
         
             if self.config.data.sampler:
-                print('USING SAMPLER')
+                logger.info('USING SAMPLER')
             if self.config.loss.amsoftmax.ratio != (1,1):
-                print(self.config.loss.amsoftmax.ratio)
-                print('USING ADAPTIVE LOSS')
+                logger.info(self.config.loss.amsoftmax.ratio)
+                logger.info('USING ADAPTIVE LOSS')
             if self.config.multi_task_learning:
-                print('multi_task_learning using'.upper())
+                logger.info('multi_task_learning using'.upper())
             theta = self.config.conv_cd.theta
             if theta > 0:
-                print(f'CDC method: {theta}')
+                logger.info(f'CDC method: {theta}')

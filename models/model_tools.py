@@ -175,7 +175,6 @@ def make_divisible(v, divisor, min_value=None):
         new_v += divisor
     return new_v
 
-
 class MobileNet(nn.Module):
     """parent class for mobilenets"""
     def __init__(self, width_mult, prob_dropout, type_dropout,
@@ -196,6 +195,7 @@ class MobileNet(nn.Module):
         # building last several layers
         self.conv_last = nn.Identity
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+
         self.spoofer = nn.Linear(embeding_dim, 2)
         if self.multi_heads:
             self.lightning = nn.Linear(embeding_dim, 5)

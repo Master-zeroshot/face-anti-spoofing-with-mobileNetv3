@@ -10,7 +10,7 @@ test_steps = None
 
 random_seed = 42
 
-datasets = dict(Celeba_root='../CelebA_Spoof',
+datasets = dict(Celeba_root='../CelebA-Spoof-zips/CelebA_Spoof',
                 Casia_root='./CASIA',
                 LCCFASD_root='../LCC_FASD')
 
@@ -21,15 +21,15 @@ optimizer = dict(lr=0.005, momentum=0.9, weight_decay=5e-4)
 
 scheduler = dict(milestones=[20,50], gamma=0.2)
 
-data = dict(batch_size=150,
-            data_loader_workers=32,
+data = dict(batch_size=50,
+            data_loader_workers=8,
             sampler=True,
             pin_memory=True)
 
 resize = dict(height=224, width=224)
 
-checkpoint = dict(snapshot_name="MobileNet3-large-224.pth.tar",
-                  experiment_path='./logs_large')
+checkpoint = dict(snapshot_name="mnv3_large_224_gausian_80_20_epoch20.pth.tar",
+                  experiment_path='./logs_xgb')
 
 loss = dict(loss_type='amsoftmax',
             amsoftmax=dict(m=0.5,
@@ -41,13 +41,14 @@ loss = dict(loss_type='amsoftmax',
                            gamma=0)
             )
 
-epochs = dict(start_epoch=0, max_epoch=71)
+epochs = dict(start_epoch=0, max_epoch=21)
 
-model= dict(model_size = 'large',
+model= dict(model_type='Mobilenet3',
+            model_size = 'large',
             width_mult = 1.0,
             pretrained=True,
             embeding_dim=1280,
-            imagenet_weights='./pretrained/mobilenetv3-large-1cd25616.pth')
+            imagenet_weights='./pretrained/mnv3_large_224_gausian_80_20_epoch20.pth.tar')
 
 aug = dict(type_aug=None,
             alpha=0.5,
@@ -69,6 +70,6 @@ RSC = dict(use_rsc=False,
 
 test_dataset = dict(type='LCC_FASD')
 
-conv_cd = dict(theta=0.7)
+conv_cd = dict(theta=0)
 
 test_file_name = "test_mnv3_large"

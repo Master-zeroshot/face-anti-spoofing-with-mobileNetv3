@@ -26,10 +26,12 @@ from torch.utils.data import Dataset
 
 
 class CelebASpoofDataset(Dataset):
-    def __init__(self, root_folder, test_mode=False, transform=None, multi_learning=True):
+    def __init__(self, root_folder, test_mode, transform=None, multi_learning=True):
         self.root_folder = root_folder
-        if test_mode:
+        if test_mode == 2:
             list_path = os.path.join(root_folder, 'metas/intra_test/items_test.json')
+        elif test_mode == 1:
+            list_path = os.path.join(root_folder, 'metas/intra_test/items_val.json')
         else:
             list_path = os.path.join(root_folder, 'metas/intra_test/items_train.json')
 

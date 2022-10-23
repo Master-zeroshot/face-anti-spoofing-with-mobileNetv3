@@ -35,21 +35,21 @@ def get_datasets(config):
 
     #set of datasets
     datasets = {'celeba_spoof_train': partial(CelebASpoofDataset, root_folder=celeba_root,
-                                            test_mode=False,
+                                            test_mode=0,
                                             multi_learning=config.multi_task_learning),
 
                 'celeba_spoof_val': partial(CelebASpoofDataset, root_folder=celeba_root,
-                                            test_mode=True,
+                                            test_mode=1,
                                             multi_learning=config.multi_task_learning),
 
                 'celeba_spoof_test': partial(CelebASpoofDataset, root_folder=celeba_root,
-                                            test_mode=True, multi_learning=config.multi_task_learning),
+                                            test_mode=2, multi_learning=config.multi_task_learning),
                 
                 'LCC_FASD_train': partial(LccFasdDataset, root_dir=lccfasd_root, protocol='train'),
 
                 'LCC_FASD_val': partial(LccFasdDataset, root_dir=lccfasd_root, protocol='val'),
 
-                'LCC_FASD_test': partial(LccFasdDataset, root_dir=lccfasd_root, protocol='test'),
+                'LCC_FASD_test': partial(LccFasdDataset, root_dir=lccfasd_root, protocol='combine_all'),
 
                 'LCC_FASD_val_test': partial(LccFasdDataset, root_dir=lccfasd_root, protocol='val_test'),
 

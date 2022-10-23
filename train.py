@@ -22,13 +22,30 @@ import albumentations as A
 import cv2 as cv
 import torch
 import torch.nn as nn
-
 from trainer import Trainer
 from utils import (Transform, build_criterion, build_model, make_dataset,
-                   make_loader, make_weights, read_py_config)
+                   make_loader, make_weights, read_py_config, SVM_Loss)
+import logging
+import os
+
+stdout_handler = logging.StreamHandler()
+file_handler = logging.FileHandler('./logs/app.log')
+
+
+logging.basicConfig(level=logging.INFO,
+                        datefmt='%m/%d/%Y %I:%M:%S %p',
+                        format='%(asctime)s [%(levelname)s] %(message)s',
+                        handlers=[
+                            file_handler,
+                            stdout_handler
+                        ]
+                        )
+
+logger = logging.getLogger(__name__)
 
 
 def main():
+
     # parse arguments
     parser = argparse.ArgumentParser(description='antispoofing training')
     parser.add_argument('--GPU', type=int, default=0, help='specify which gpu to use')
@@ -44,12 +61,17 @@ def main():
     path_to_config = args.config
     config = read_py_config(path_to_config)
     device = args.device + f':{args.GPU}' if args.device == 'cuda' else 'cpu'
+
+
+    
     if config.multi_task_learning and config.dataset != 'celeba_spoof':
         raise NotImplementedError(
             'Note, that multi task learning is avaliable for celeba_spoof only. '
             'Please, switch it off in config file'
             )
     # launch training, validation, testing
+    torch.cuda.empty_cache()
+
     train(config, device, args.save_checkpoint)
 
 def train(config, device='cuda:0', save_chkpt=True):
@@ -103,10 +125,23 @@ def train(config, device='cuda:0', save_chkpt=True):
     # build model and put it to cuda and if it needed then wrap model to data parallel
     model = build_model(config, device=device, strict=False, mode='train')
     model.to(device)
+
+    for param in model.parameters():
+        param.requires_grad = False
+
+    # for param in model.parameters():
+    #         print(param.requires_grad)
+
+
+
+    # for param in model.conv_last.parameters():
+    #         print(param.requires_grad)
     
     # build a criterion
+    # svm_loss_criteria = SVM_Loss(config.data.batch_size)
     softmax = build_criterion(config, device, task='main').to(device)
     cross_entropy = build_criterion(config, device, task='rest').to(device)
+    SVM_Loss(config.data.batch_size)
     bce = nn.BCELoss().to(device)
     criterion = (softmax, cross_entropy, bce) if config.multi_task_learning else softmax
 
@@ -125,7 +160,7 @@ def train(config, device='cuda:0', save_chkpt=True):
 
         # train model for one epoch
         train_loss, train_accuracy = trainer.train(epoch)
-        print(f'epoch: {epoch}  train loss: {train_loss}   train accuracy: {train_accuracy}')
+        logger.info(f'epoch: {epoch}  train loss: {train_loss}   train accuracy: {train_accuracy}')
 
         # validate your model
         accuracy = trainer.validate()

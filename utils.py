@@ -12,8 +12,10 @@ from torch.utils.data import DataLoader
 
 from datasets import get_datasets
 from losses import (AMSoftmaxLoss, AngleSimpleLinear)
-from models import mobilenetv3_large, mobilenetv3_small
+from models import mobilenetv2, mobilenetv3_large, mobilenetv3_small
+import logging
 
+logger = logging.getLogger(__name__)
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
@@ -56,13 +58,13 @@ def read_py_config(filename):
     return cfg_dict
 
 def save_checkpoint(state, filename="my_model.pth.tar"):
-    print('==> saving checkpoint')
+    logger.info('==> saving checkpoint')
     torch.save(state, filename)
 
 def load_checkpoint(checkpoint_path, net, map_location, optimizer=None, load_optimizer=False, strict=True):
     ''' load a checkpoint of the given model. If model is using for training with imagenet weights provided by
         this project, then delete some wights due to mismatching architectures'''
-    print("\n==> Loading checkpoint")
+    logger.info("\n==> Loading checkpoint")
     checkpoint = torch.load(checkpoint_path, map_location=map_location)
     if 'state_dict' in checkpoint:
         unloaded = net.load_state_dict(checkpoint['state_dict'], strict=strict)
@@ -71,13 +73,13 @@ def load_checkpoint(checkpoint_path, net, map_location, optimizer=None, load_opt
         unloaded = net.load_state_dict(checkpoint, strict=strict)
         missing_keys, unexpected_keys = (', '.join(i) for i in unloaded)
     if missing_keys or unexpected_keys:
-        logging.warning(f'THE FOLLOWING KEYS HAVE NOT BEEN LOADED:\n\nmissing keys: {missing_keys}\
+        logger.warning(f'THE FOLLOWING KEYS HAVE NOT BEEN LOADED:\n\nmissing keys: {missing_keys}\
             \n\nunexpected keys: {unexpected_keys}\n')
-        print('proceed traning ...')
+        logger.info('proceed traning ...')
     if load_optimizer:
         optimizer.load_state_dict(checkpoint['optimizer'])
     if 'epoch' in checkpoint:
-        print(checkpoint['epoch'])
+        logger.info(checkpoint['epoch'])
         return checkpoint['epoch']
 
 def precision(output, target, s=None):
@@ -166,7 +168,16 @@ def make_dataset(config: dict, train_transform: object = None, val_transform: ob
         assert mode == 'eval'
         return test_data
 
+import random
+def seed_worker(worker_id):
+    worker_seed = torch.initial_seed() % 2**32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
+
+
 def make_loader(train, val, test, config, sampler=None):
+    g = torch.Generator()
+    g.manual_seed(config.random_seed)
     ''' make data loader from given train and val dataset
     train, val -> train loader, val loader'''
     if sampler:
@@ -175,18 +186,20 @@ def make_loader(train, val, test, config, sampler=None):
         shuffle = True
     train_loader = DataLoader(dataset=train, batch_size=config.data.batch_size,
                                                     shuffle=shuffle, pin_memory=config.data.pin_memory,
-                                                    num_workers=config.data.data_loader_workers, sampler=sampler)
+                                                    num_workers=config.data.data_loader_workers, sampler=sampler,
+                                                    worker_init_fn=seed_worker,generator=g,)
 
     val_loader = DataLoader(dataset=val, batch_size=config.data.batch_size,
                                                 shuffle=True, pin_memory=config.data.pin_memory,
-                                                num_workers=config.data.data_loader_workers)
+                                                num_workers=config.data.data_loader_workers,
+                                                worker_init_fn=seed_worker,generator=g,)
 
     test_loader = DataLoader(dataset=test, batch_size=config.data.batch_size,
                                                 shuffle=True, pin_memory=config.data.pin_memory,
-                                                num_workers=config.data.data_loader_workers)
+                                                num_workers=config.data.data_loader_workers,
+                                                worker_init_fn=seed_worker,generator=g,)
 
     return train_loader, val_loader, test_loader
-
 def build_model(config, device, strict=True, mode='train'):
     ''' build model and change layers depends on loss type'''
     parameters = dict(width_mult=config.model.width_mult,
@@ -197,30 +210,47 @@ def build_model(config, device, strict=True, mode='train'):
                     embeding_dim=config.model.embeding_dim,
                     prob_dropout_linear = config.dropout.classifier,
                     theta=config.conv_cd.theta,
-                    multi_heads = config.multi_task_learning)
+                    multi_heads = config.multi_task_learning,
+                    )
 
-    if config.model.model_size == 'large':
-        model = mobilenetv3_large(**parameters)
+    if config.model.model_type == 'Mobilenet2':
+        model = mobilenetv2(**parameters)
 
         if config.model.pretrained and mode == "train":
             checkpoint_path = config.model.imagenet_weights
-            print(f"checkpoint_path: {checkpoint_path}")
             load_checkpoint(checkpoint_path, model, strict=strict, map_location=device)
         elif mode == 'convert':
             model.forward = model.forward_to_onnx
+
+        if (config.loss.loss_type == 'amsoftmax') and (config.loss.amsoftmax.margin_type != 'cross_entropy'):
+            model.spoofer = AngleSimpleLinear(config.model.embeding_dim, 2)
+        elif config.loss.loss_type == 'soft_triple':
+            model.spoofer = SoftTripleLinear(config.model.embeding_dim, 2,
+                                             num_proxies=config.loss.soft_triple.K)
     else:
-        assert config.model.model_size == 'small'
-        model = mobilenetv3_small(**parameters)
+        assert config.model.model_type == 'Mobilenet3'
+        if config.model.model_size == 'large':
+            model = mobilenetv3_large(**parameters)
 
-        if config.model.pretrained and mode == "train":
-            checkpoint_path = config.model.imagenet_weights
-            load_checkpoint(checkpoint_path, model, strict=strict, map_location=device)
-        elif mode == 'convert':
-            model.forward = model.forward_to_onnx
+            if config.model.pretrained and mode == "train":
+                checkpoint_path = config.model.imagenet_weights
+                logger.info(f"checkpoint_path: {checkpoint_path}")
+                load_checkpoint(checkpoint_path, model, strict=strict, map_location=device)
+            elif mode == 'convert':
+                model.forward = model.forward_to_onnx
+        else:
+            assert config.model.model_size == 'small'
+            model = mobilenetv3_small(**parameters)
 
-    if (config.loss.loss_type == 'amsoftmax') and (config.loss.amsoftmax.margin_type != 'cross_entropy'):
-        model.scaling = config.loss.amsoftmax.s
-        model.spoofer[3] = AngleSimpleLinear(config.model.embeding_dim, 2)
+            if config.model.pretrained and mode == "train":
+                checkpoint_path = config.model.imagenet_weights
+                load_checkpoint(checkpoint_path, model, strict=strict, map_location=device)
+            elif mode == 'convert':
+                model.forward = model.forward_to_onnx
+
+        if (config.loss.loss_type == 'amsoftmax') and (config.loss.amsoftmax.margin_type != 'cross_entropy'):
+            model.scaling = config.loss.amsoftmax.s
+            model.spoofer[3] = AngleSimpleLinear(config.model.embeding_dim, 2)
     return model
 
 def build_criterion(config, device, task='main'):
@@ -333,3 +363,12 @@ def get_tpr_from_threshold(scores,labels, threshold_list):
         tpr_list.append(tpr)
     return tpr_list
 
+
+import torch.nn as nn
+
+class SVM_Loss(nn.modules.Module):
+    def __init__(self, batch_size):
+        super(SVM_Loss, self).__init__()
+        self.batch_size = batch_size
+    def forward(self, outputs, labels):
+        return torch.mean(torch.clamp(1 - outputs*labels, min=0))/self.batch_size
